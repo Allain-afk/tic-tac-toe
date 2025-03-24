@@ -6,6 +6,13 @@
 #include <vector>
 #include <algorithm>
 
+#ifdef _WIN32
+#include <conio.h>
+#else
+#include <termios.h>
+#include <unistd.h>
+#endif
+
 using namespace std;
 
 // Game constants
@@ -13,6 +20,18 @@ const int BOARD_SIZE = 3;
 const int WIN_CONDITION = 3;
 const int DEFAULT_ROUNDS = 5;
 const int DEFAULT_WINS_NEEDED = 3;
+
+// Key codes
+const int KEY_UP = 72;
+const int KEY_DOWN = 80;
+const int KEY_ENTER = 13;
+
+#ifndef _WIN32
+const int KEY_ESC = 27;
+const int KEY_BRACKET = 91;
+const int KEY_UP_UNIX = 65;
+const int KEY_DOWN_UNIX = 66;
+#endif
 
 // Enum for player types
 enum PlayerType { HUMAN, COMPUTER };
@@ -32,9 +51,10 @@ struct GameState {
 };
 
 // Function prototypes
-void displayMenu();
+void displayMenu(int selectedOption);
+void displayGameModeMenu(int selectedOption);
 void playGame(GameState& game);
-void initializeGame(GameState& game);
+void initializeGame(GameState& game, int modeChoice);
 void howToPlay();
 void developers();
 bool exitGame();
@@ -50,108 +70,198 @@ void clearScreen();
 void waitForEnter();
 inline bool isValidPosition(int row, int col);
 void displayGameStats(const GameState& game);
+int getArrowKeyInput();
+
+#ifndef _WIN32
+// Function to get character without waiting for Enter
+char getch() {
+    char buf = 0;
+    struct termios old = {0};
+    if (tcgetattr(0, &old) < 0)
+        perror("tcsetattr()");
+    old.c_lflag &= ~ICANON;
+    old.c_lflag &= ~ECHO;
+    old.c_cc[VMIN] = 1;
+    old.c_cc[VTIME] = 0;
+    if (tcsetattr(0, TCSANOW, &old) < 0)
+        perror("tcsetattr ICANON");
+    if (read(0, &buf, 1) < 0)
+        perror("read()");
+    old.c_lflag |= ICANON;
+    old.c_lflag |= ECHO;
+    if (tcsetattr(0, TCSADRAIN, &old) < 0)
+        perror("tcsetattr ~ICANON");
+    return buf;
+}
+#endif
 
 int main() {
     srand(static_cast<unsigned int>(time(nullptr))); // Seed for random number generation
-    
-    int choice;
+
+    int selectedOption = 1;
     bool running = true;
     GameState gameState;
-    
+
     while (running) {
-        displayMenu();
-        cout << "Enter your choice (1-4): ";
-        
-        // Input validation
-        while (!(cin >> choice) || choice < 1 || choice > 4) {
-            cin.clear();
-            cin.ignore(numeric_limits<streamsize>::max(), '\n');
-            cout << "Invalid input. Please enter a number between 1 and 4: ";
-        }
-        
-        switch (choice) {
-            case 1:
-                playGame(gameState);
-                break;
-            case 2:
-                howToPlay();
-                break;
-            case 3:
-                developers();
-                break;
-            case 4:
-                running = !exitGame();
-                break;
+        displayMenu(selectedOption);
+
+        int key = getArrowKeyInput();
+
+        if (key == KEY_UP) {
+            selectedOption = (selectedOption > 1) ? selectedOption - 1 : 4;
+        } else if (key == KEY_DOWN) {
+            selectedOption = (selectedOption < 4) ? selectedOption + 1 : 1;
+        } else if (key == KEY_ENTER) {
+            switch (selectedOption) {
+                case 1: { // Play Game
+                    int gameModeOption = 1;
+                    bool selectingMode = true;
+
+                    while (selectingMode) {
+                        displayGameModeMenu(gameModeOption);
+
+                        int modeKey = getArrowKeyInput();
+
+                        if (modeKey == KEY_UP) {
+                            gameModeOption = (gameModeOption > 1) ? gameModeOption - 1 : 3;
+                        } else if (modeKey == KEY_DOWN) {
+                            gameModeOption = (gameModeOption < 3) ? gameModeOption + 1 : 1;
+                        } else if (modeKey == KEY_ENTER) {
+                            if (gameModeOption == 3) { // Go Back
+                                selectingMode = false;
+                            } else {
+                                initializeGame(gameState, gameModeOption);
+                                playGame(gameState);
+                                selectingMode = false;
+                            }
+                        }
+                    }
+                    break;
+                }
+                case 2: { // How to Play
+                    bool back = false;
+                    while (!back) {
+                        clearScreen();
+                        cout << "======================================\n";
+                        cout << "            HOW TO PLAY              \n";
+                        cout << "======================================\n";
+                        cout << "Game Rules:\n";
+                        cout << "1. The game is played on a 3x3 grid.\n";
+                        cout << "2. Players take turns placing their symbol (X or O) in empty cells.\n";
+                        cout << "3. The first player to get 3 of their symbols in a row wins the round.\n";
+                        cout << "4. If all cells are filled and no player has won, the round is a tie.\n\n";
+                        cout << "Press Enter to go back...\n";
+
+                        int key = getArrowKeyInput();
+                        if (key == KEY_ENTER) {
+                            back = true;
+                        }
+                    }
+                    break;
+                }
+                case 3: { // Developers
+                    bool back = false;
+                    while (!back) {
+                        clearScreen();
+                        cout << "======================================\n";
+                        cout << "             DEVELOPERS              \n";
+                        cout << "======================================\n";
+                        cout << "Name: Allain\n";
+                        cout << "Motto: \"Balo ani bai\"\n";
+                        cout << "Status: It's complicated UwU\n\n";
+                        cout << "Press Enter to go back...\n";
+
+                        int key = getArrowKeyInput();
+                        if (key == KEY_ENTER) {
+                            back = true;
+                        }
+                    }
+                    break;
+                }
+                case 4: // Exit
+                    running = !exitGame();
+                    break;
+            }
         }
     }
-    
+
     return 0;
 }
 
-void clearScreen() {
-    #ifdef _WIN32
-        system("cls");
-    #else
-        system("clear");
-    #endif
+int getArrowKeyInput() {
+#ifdef _WIN32
+    int ch = _getch();
+    if (ch == 224) { // Arrow key prefix
+        ch = _getch();
+        return ch;
+    }
+    return ch;
+#else
+    char ch = getch();
+    if (ch == KEY_ESC) {
+        ch = getch();
+        if (ch == KEY_BRACKET) {
+            ch = getch();
+            if (ch == KEY_UP_UNIX) return KEY_UP;
+            if (ch == KEY_DOWN_UNIX) return KEY_DOWN;
+        }
+    }
+    return ch;
+#endif
 }
 
-void waitForEnter() {
-    cout << "Press Enter to continue...";
-    cin.ignore(numeric_limits<streamsize>::max(), '\n');
-    cin.get();
-}
-
-void displayMenu() {
+void displayMenu(int selectedOption) {
     clearScreen();
     cout << "======================================\n";
     cout << "           TIC TAC TOE GAME          \n";
     cout << "======================================\n";
-    cout << "1. Play Game\n";
-    cout << "2. How to Play\n";
-    cout << "3. Developers\n";
-    cout << "4. Exit\n";
+    cout << (selectedOption == 1 ? "\033[35m> 1. Play Game\033[0m\n" : "  1. Play Game\n");
+    cout << (selectedOption == 2 ? "\033[35m> 2. How to Play\033[0m\n" : "  2. How to Play\n");
+    cout << (selectedOption == 3 ? "\033[35m> 3. Developers\033[0m\n" : "  3. Developers\n");
+    cout << (selectedOption == 4 ? "\033[35m> 4. Exit\033[0m\n" : "  4. Exit\n");
     cout << "======================================\n";
+    cout << "Use arrow keys to navigate and Enter to select\n";
 }
 
-void initializeGame(GameState& game) {
+void displayGameModeMenu(int selectedOption) {
+    clearScreen();
+    cout << "======================================\n";
+    cout << "            GAME MODE                \n";
+    cout << "======================================\n";
+    cout << (selectedOption == 1 ? "\033[35m> 1. Player vs Player\033[0m\n" : "  1. Player vs Player\n");
+    cout << (selectedOption == 2 ? "\033[35m> 2. Player vs Computer\033[0m\n" : "  2. Player vs Computer\n");
+    cout << (selectedOption == 3 ? "\033[35m> 3. Go Back\033[0m\n" : "  3. Go Back\n");
+    cout << "======================================\n";
+    cout << "Use arrow keys to navigate and Enter to select\n";
+}
+
+void initializeGame(GameState& game, int modeChoice) {
     clearScreen();
     cout << "======================================\n";
     cout << "              PLAY GAME              \n";
     cout << "======================================\n";
-    cout << "Choose game mode:\n";
-    cout << "1. Player vs Player\n";
-    cout << "2. Player vs Computer\n";
-    cout << "Enter your choice (1-2): ";
-    
-    int modeChoice;
-    while (!(cin >> modeChoice) || modeChoice < 1 || modeChoice > 2) {
-        cin.clear();
-        cin.ignore(numeric_limits<streamsize>::max(), '\n');
-        cout << "Invalid input. Please enter 1 or 2: ";
-    }
-    
+
     game.player2Type = (modeChoice == 2) ? COMPUTER : HUMAN;
-    
+
     // Get player names
     cin.ignore(); // Clear input buffer
     cout << "Enter Player 1 name: ";
     getline(cin, game.player1Name);
-    
+
     if (game.player2Type == COMPUTER) {
         cout << "Choose difficulty level:\n";
         cout << "1. Easy\n";
         cout << "2. Medium\n";
         cout << "3. Hard\n";
         cout << "Enter your choice (1-3): ";
-        
+
         int diffLevel;
         while (!(cin >> diffLevel) || diffLevel < 1 || diffLevel > 3) {
             cin.clear();
             cin.ignore(numeric_limits<streamsize>::max(), '\n');
             cout << "Invalid input. Please enter a number between 1 and 3: ";
         }
-        
+
         game.difficulty = static_cast<DifficultyLevel>(diffLevel);
         game.player2Name = "Computer";
         cin.ignore(); // Clear input buffer
@@ -159,11 +269,11 @@ void initializeGame(GameState& game) {
         cout << "Enter Player 2 name: ";
         getline(cin, game.player2Name);
     }
-    
+
     cout << "Enter number of rounds (default is " << DEFAULT_ROUNDS << "): ";
     string roundsInput;
     getline(cin, roundsInput);
-    
+
     if (!roundsInput.empty()) {
         try {
             game.totalRounds = stoi(roundsInput);
@@ -172,11 +282,11 @@ void initializeGame(GameState& game) {
             game.totalRounds = DEFAULT_ROUNDS;
         }
     }
-    
+
     cout << "Enter number of wins needed to win the game (default is " << DEFAULT_WINS_NEEDED << "): ";
     string winsInput;
     getline(cin, winsInput);
-    
+
     if (!winsInput.empty()) {
         try {
             game.winsNeeded = stoi(winsInput);
@@ -185,7 +295,7 @@ void initializeGame(GameState& game) {
             game.winsNeeded = DEFAULT_WINS_NEEDED;
         }
     }
-    
+
     // Reset scores
     game.player1Score = 0;
     game.player2Score = 0;
@@ -193,38 +303,36 @@ void initializeGame(GameState& game) {
 }
 
 void playGame(GameState& game) {
-    initializeGame(game);
-    
     // Start the game rounds
     int currentRound = 1;
     bool continueGame = true;
-    
+
     while (continueGame && 
            (currentRound <= game.totalRounds) && 
            (game.player1Score < game.winsNeeded && game.player2Score < game.winsNeeded)) {
-        
+
         resetBoard(game.board);
         bool roundOver = false;
         bool playerTurn = true; // true for player 1, false for player 2
-        
+
         clearScreen();
         cout << "======================================\n";
         cout << "             ROUND " << currentRound << "/" << game.totalRounds << "             \n";
         cout << "======================================\n";
         displayGameStats(game);
-        
+
         while (!roundOver) {
             displayBoard(game.board);
-            
+
             if (playerTurn) {
                 cout << game.player1Name << "'s turn (X).\n";
                 pair<int, int> move = getPlayerMove();
-                
+
                 while (!makeMove(game.board, move.first, move.second, 'X')) {
                     cout << "Cell already occupied. Try again.\n";
                     move = getPlayerMove();
                 }
-                
+
                 if (checkWin(game.board, 'X')) {
                     displayBoard(game.board);
                     cout << game.player1Name << " wins this round!\n";
@@ -238,13 +346,13 @@ void playGame(GameState& game) {
                 } else {
                     cout << game.player2Name << "'s turn (O).\n";
                     pair<int, int> move = getPlayerMove();
-                    
+
                     while (!makeMove(game.board, move.first, move.second, 'O')) {
                         cout << "Cell already occupied. Try again.\n";
                         move = getPlayerMove();
                     }
                 }
-                
+
                 if (checkWin(game.board, 'O')) {
                     displayBoard(game.board);
                     cout << game.player2Name << " wins this round!\n";
@@ -252,24 +360,24 @@ void playGame(GameState& game) {
                     roundOver = true;
                 }
             }
-            
+
             if (!roundOver && isBoardFull(game.board)) {
                 displayBoard(game.board);
                 cout << "This round is a tie!\n";
                 game.ties++;
                 roundOver = true;
             }
-            
+
             playerTurn = !playerTurn; // Switch turns
         }
-        
+
         // Check if game should continue to next round
         if (isBoardFull(game.board) && !checkWin(game.board, 'X') && !checkWin(game.board, 'O')) {
             cout << "Tied game will be reset without advancing round.\n";
         } else {
             currentRound++;
         }
-        
+
         // Check if a player reached required wins
         if (game.player1Score >= game.winsNeeded) {
             cout << game.player1Name << " wins the game with " << game.winsNeeded << " victories!\n";
@@ -278,23 +386,23 @@ void playGame(GameState& game) {
             cout << game.player2Name << " wins the game with " << game.winsNeeded << " victories!\n";
             continueGame = false;
         }
-        
+
         if (continueGame && currentRound <= game.totalRounds) {
             waitForEnter();
         }
     }
-    
+
     // Game over
     cout << "======================================\n";
     cout << "           FINAL RESULTS             \n";
     cout << "======================================\n";
     displayGameStats(game);
-    
+
     // Ask to play again or return to menu
     cout << "Do you want to play again? (y/n): ";
     char choice;
     cin >> choice;
-    
+
     if (tolower(choice) == 'y') {
         playGame(game);
     }
@@ -308,7 +416,7 @@ void displayGameStats(const GameState& game) {
 pair<int, int> getPlayerMove() {
     int row, col;
     cout << "Enter row (0-2) and column (0-2): ";
-    
+
     while (true) {
         if (cin >> row >> col) {
             if (isValidPosition(row, col)) {
@@ -361,7 +469,7 @@ bool checkWin(const char board[BOARD_SIZE][BOARD_SIZE], char symbol) {
             return true;
         }
     }
-    
+
     // Check diagonals
     if (board[0][0] == symbol && board[1][1] == symbol && board[2][2] == symbol) {
         return true;
@@ -369,7 +477,7 @@ bool checkWin(const char board[BOARD_SIZE][BOARD_SIZE], char symbol) {
     if (board[0][2] == symbol && board[1][1] == symbol && board[2][0] == symbol) {
         return true;
     }
-    
+
     return false;
 }
 
@@ -396,7 +504,7 @@ void computerMove(char board[BOARD_SIZE][BOARD_SIZE], DifficultyLevel difficulty
     // Easy: Random move
     if (difficulty == EASY) {
         vector<pair<int, int>> emptyCells;
-        
+
         for (int i = 0; i < BOARD_SIZE; i++) {
             for (int j = 0; j < BOARD_SIZE; j++) {
                 if (board[i][j] == ' ') {
@@ -404,7 +512,7 @@ void computerMove(char board[BOARD_SIZE][BOARD_SIZE], DifficultyLevel difficulty
                 }
             }
         }
-        
+
         if (!emptyCells.empty()) {
             int index = rand() % emptyCells.size();
             board[emptyCells[index].first][emptyCells[index].second] = 'O';
@@ -424,7 +532,7 @@ void computerMove(char board[BOARD_SIZE][BOARD_SIZE], DifficultyLevel difficulty
                 }
             }
         }
-        
+
         // Try to block
         for (int i = 0; i < BOARD_SIZE; i++) {
             for (int j = 0; j < BOARD_SIZE; j++) {
@@ -438,32 +546,32 @@ void computerMove(char board[BOARD_SIZE][BOARD_SIZE], DifficultyLevel difficulty
                 }
             }
         }
-        
+
         // Try to take center
         if (board[1][1] == ' ') {
             board[1][1] = 'O';
             return;
         }
-        
+
         // Take a corner if available
         const vector<pair<int, int>> corners = {{0,0}, {0,2}, {2,0}, {2,2}};
         vector<pair<int, int>> availableCorners;
-        
+
         for (const auto& corner : corners) {
             if (board[corner.first][corner.second] == ' ') {
                 availableCorners.push_back(corner);
             }
         }
-        
+
         if (!availableCorners.empty()) {
             int index = rand() % availableCorners.size();
             board[availableCorners[index].first][availableCorners[index].second] = 'O';
             return;
         }
-        
+
         // Otherwise, make a random move
         vector<pair<int, int>> emptyCells;
-        
+
         for (int i = 0; i < BOARD_SIZE; i++) {
             for (int j = 0; j < BOARD_SIZE; j++) {
                 if (board[i][j] == ' ') {
@@ -471,7 +579,7 @@ void computerMove(char board[BOARD_SIZE][BOARD_SIZE], DifficultyLevel difficulty
                 }
             }
         }
-        
+
         if (!emptyCells.empty()) {
             int index = rand() % emptyCells.size();
             board[emptyCells[index].first][emptyCells[index].second] = 'O';
@@ -482,14 +590,14 @@ void computerMove(char board[BOARD_SIZE][BOARD_SIZE], DifficultyLevel difficulty
         int bestScore = -1000;
         int bestRow = -1;
         int bestCol = -1;
-        
+
         for (int i = 0; i < BOARD_SIZE; i++) {
             for (int j = 0; j < BOARD_SIZE; j++) {
                 if (board[i][j] == ' ') {
                     board[i][j] = 'O';
                     int score = minimax(board, 0, false);
                     board[i][j] = ' '; // Undo move
-                    
+
                     if (score > bestScore) {
                         bestScore = score;
                         bestRow = i;
@@ -498,7 +606,7 @@ void computerMove(char board[BOARD_SIZE][BOARD_SIZE], DifficultyLevel difficulty
                 }
             }
         }
-        
+
         if (bestRow != -1 && bestCol != -1) {
             board[bestRow][bestCol] = 'O';
         }
@@ -510,7 +618,7 @@ int minimax(char board[BOARD_SIZE][BOARD_SIZE], int depth, bool isMaximizing, in
     if (checkWin(board, 'O')) return 10 - depth;
     if (checkWin(board, 'X')) return depth - 10;
     if (isBoardFull(board)) return 0;
-    
+
     if (isMaximizing) {
         int bestScore = -1000;
         for (int i = 0; i < BOARD_SIZE; i++) {
@@ -546,6 +654,20 @@ int minimax(char board[BOARD_SIZE][BOARD_SIZE], int depth, bool isMaximizing, in
     }
 }
 
+void clearScreen() {
+    #ifdef _WIN32
+        system("cls");
+    #else
+        system("clear");
+    #endif
+}
+
+void waitForEnter() {
+    cout << "Press Enter to continue...";
+    cin.ignore(numeric_limits<streamsize>::max(), '\n');
+    cin.get();
+}
+
 void howToPlay() {
     clearScreen();
     cout << "======================================\n";
@@ -557,24 +679,24 @@ void howToPlay() {
     cout << "3. The first player to get 3 of their symbols in a row (horizontally,\n";
     cout << "   vertically, or diagonally) wins the round.\n";
     cout << "4. If all cells are filled and no player has won, the round is a tie.\n\n";
-    
+
     cout << "Game Features:\n";
     cout << "- Two game modes: Player vs Player or Player vs Computer\n";
     cout << "- Three difficulty levels for computer opponent\n";
     cout << "- Customizable number of rounds\n";
     cout << "- Customizable win condition (how many rounds to win)\n";
     cout << "- Tied rounds do not count and will be replayed\n\n";
-    
+
     cout << "How to Enter Moves:\n";
     cout << "- Enter the row number (0-2) followed by a space\n";
     cout << "- Then enter the column number (0-2)\n";
     cout << "- Example: '1 2' will place your symbol in the middle row, rightmost column\n\n";
-    
+
     cout << "Computer Difficulty Levels:\n";
     cout << "- Easy: Makes random moves\n";
     cout << "- Medium: Can block your winning moves and try to win itself\n";
     cout << "- Hard: Uses an optimal strategy (minimax algorithm) - very difficult to beat!\n\n";
-    
+
     waitForEnter();
 }
 
@@ -586,7 +708,7 @@ void developers() {
     cout << "Name: Allain\n";
     cout << "Motto: \"Balo ani bai\"\n";
     cout << "Status: It's complicated UwU\n\n";
-    
+
     waitForEnter();
 }
 
@@ -597,10 +719,9 @@ bool exitGame() {
     cout << "======================================\n";
     cout << "Thank you for playing Tic Tac Toe!\n";
     cout << "Do you want to play again? (y/n): ";
-    
+
     char choice;
     cin >> choice;
-    
+
     return tolower(choice) != 'y';
 }
-
